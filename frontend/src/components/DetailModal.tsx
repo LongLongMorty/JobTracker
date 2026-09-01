@@ -1,4 +1,4 @@
-import {useState} from 'react';
+import {useEffect, useState} from 'react';
 import {Plus, Trash2, ChevronDown, ChevronUp, CalendarClock} from 'lucide-react';
 import Modal from './Modal';
 import MarkdownEditor from './MarkdownEditor';
@@ -32,8 +32,23 @@ export default function DetailModal({app, onClose, onChanged}: Props) {
 
     const set = (k: keyof typeof form, v: string) => setForm((f) => ({...f, [k]: v}));
 
+    // 面试挂自动同步等后端状态变化时, 同步到表单
+    useEffect(() => {
+        setForm((f) => (f.status === app.status ? f : {...f, status: app.status}));
+    }, [app.status]);
+
     const refresh = async () => {
         await onChanged();
+    };
+
+    const changeStatus = async (status: string) => {
+        set('status', status);
+        try {
+            await api.updateStatus(app.id, status);
+            await refresh();
+        } catch (e: any) {
+            setError(String(e?.message ?? e));
+        }
     };
 
     const saveRecord = async () => {
@@ -54,9 +69,9 @@ export default function DetailModal({app, onClose, onChanged}: Props) {
                 contact_info: form.contact_info,
                 jd_text: form.jd_text,
                 notes: form.notes,
+                status: app.status,
             };
             await api.updateApplication(app.id, inp);
-            await api.updateStatus(app.id, form.status);
             await refresh();
             setBusy(false);
         } catch (e: any) {
@@ -160,9 +175,9 @@ export default function DetailModal({app, onClose, onChanged}: Props) {
                     </div>
                     <div>
                         <label className={labelCls}>状态</label>
-                        <select className={inputCls} value={form.status} onChange={(e) => set('status', e.target.value)}>
+                        <select className={inputCls} value={form.status} onChange={(e) => changeStatus(e.target.value)}>
                             {STATUSES.map((s) => (
-                                <option key={s} value={s}>{STATUS_META[s].label} ({s})</option>
+                                <option key={s} value={s}>{STATUS_META[s].label}</option>
                             ))}
                         </select>
                     </div>
@@ -234,7 +249,7 @@ export default function DetailModal({app, onClose, onChanged}: Props) {
                                         <span className="text-slate-400">
                                             {isOpen ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}
                                         </span>
-                                        <span className={`h-2 w-2 rounded-full ${STATUS_META[iv.outcome === 'PASSED' ? 'OFFERED' : iv.outcome === 'FAILED' ? 'REJECTED' : 'APPLIED'].dot}`}/>
+                                        <span className={`h-2 w-2 rounded-full ${STATUS_META[iv.outcome === 'PASSED' ? 'OFFERED' : iv.outcome === 'FAILED' ? 'INTERVIEW_FAILED' : 'APPLIED'].dot}`}/>
                                         <span className="text-sm font-medium text-slate-700 flex-1 truncate">
                                             {iv.round_name || (isTemp ? '新面试' : '(未命名)')}
                                         </span>

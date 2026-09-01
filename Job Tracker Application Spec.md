@@ -15,17 +15,18 @@ A lightweight, single-user desktop application designed to track and manage job 
 
 ### Feature 1: Kanban Board (Application Pipeline)
 
-- **Columns** (6 statuses, `REJECTED` 与 `ARCHIVED` 分开以便复盘):
-  1. `Wishlist` (准备投递)
-  2. `Applied` (已投递)
-  3. `Interviewing` (面试中)
-  4. `Offered` (已获 Offer)
-  5. `Rejected` (未通过)
-  6. `Archived` (已归档/主动放弃)
+- **Columns** (6 statuses, 无备投列, 记录即已投递; 被动被拒拆分为简历挂/面试挂, 主动拒为已拒绝):
+  1. `Applied` (已投递)
+  2. `Interviewing` (面试中)
+  3. `Offered` (已获 Offer)
+  4. `Resume Rejected` (简历挂)
+  5. `Interview Failed` (面试挂)
+  6. `Declined` (已拒绝, 我拒绝对方)
 - **Interactions**:
   - Drag-and-drop cards between columns to update status (`status` field).
   - Quick-add card from the Kanban header with minimal fields (Company, Role, Resume Version).
-  - **`applied_at` 自动填充**: 卡片从 `WISHLIST` 拖到 `APPLIED` 时，自动记录当天日期；用户可在详情中手动修改。
+  - **`applied_at` 自动填充**: 新建记录时自动记录当天日期；卡片拖入 `APPLIED` 列时若为空也会自动填充；用户可在详情中手动修改。
+  - **面试结果自动同步**: 任一轮面试标记为 `FAILED` 时，卡片自动移到「面试挂」；改回 `PASSED`/`PENDING` 时若当前为「面试挂」则回到「面试中」。
 
 ### Feature 2: Application Detailed Record
 
@@ -33,10 +34,10 @@ A lightweight, single-user desktop application designed to track and manage job 
   - `id`: INTEGER PRIMARY KEY
   - `company`: TEXT (Required)
   - `position`: TEXT (Required, 岗位名称)
-  - `status`: ENUM string (`WISHLIST`, `APPLIED`, `INTERVIEWING`, `OFFERED`, `REJECTED`, `ARCHIVED`)
+  - `status`: ENUM string (`APPLIED`, `INTERVIEWING`, `OFFERED`, `RESUME_REJECTED`, `INTERVIEW_FAILED`, `DECLINED`)
   - `resume_version`: TEXT (e.g., "v1.2-AI-Infra", "v2.0-Backend")
   - `jd_text`: TEXT (Raw Job Description)
-  - `applied_at`: DATETIME (拖入 Applied 列时自动填充, 可手动修改)
+  - `applied_at`: DATETIME (新建/拖入 Applied 列时自动填充, 可手动修改)
   - `location`: TEXT
   - `salary_range`: TEXT
   - `contact_info`: TEXT (Recruiter name/email/referral note)
@@ -53,12 +54,13 @@ A lightweight, single-user desktop application designed to track and manage job 
   - `scheduled_at`: DATETIME
   - `questions_and_notes`: TEXT (Markdown: Question Bank, Answers, Improvements)
   - `outcome`: ENUM (`PENDING`, `PASSED`, `FAILED`)
+- 某轮面试标记为 `FAILED` 时自动把所属申请的 `status` 同步为 `INTERVIEW_FAILED` (从 `FAILED` 改回时若状态为 `INTERVIEW_FAILED` 则回到 `INTERVIEWING`)
 
 ### Feature 4: Basic Analytics (Stats Drawer/Modal)
 
-- Top metrics: Total Applied, Interview Rate, Offer Rate.
-  - **Interview Rate** = 进入过面试的申请数 / 已投递总数。通过 `reached_interview` 标志统计（见 schema, 状态首次变为 `INTERVIEWING` 时置 1, 只增不改）
-  - **Offer Rate** = 已获 Offer 数 / 已投递总数
+- Top metrics: Total Applied, Interview Rate, Offer Rate, plus 简历挂 / 面试挂 / 已拒绝 计数。
+  - **Interview Rate** = 进入过面试的申请数 / 全部记录数。通过 `reached_interview` 标志统计（见 schema, 状态首次变为 `INTERVIEWING` 或 `INTERVIEW_FAILED` 时置 1, 只增不改）
+  - **Offer Rate** = 已获 Offer 数 / 全部记录数
 - Breakdown by Resume Version (shows which version gets the highest interview yield).
 
 ### Feature 5: Data Export (数据导出)
@@ -75,11 +77,11 @@ CREATE TABLE IF NOT EXISTS applications (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     company TEXT NOT NULL,
     position TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'WISHLIST',   -- WISHLIST / APPLIED / INTERVIEWING / OFFERED / REJECTED / ARCHIVED
-    reached_interview INTEGER NOT NULL DEFAULT 0,  -- 首次进入 INTERVIEWING 时置 1, 只增不改 (统计用)
+    status TEXT NOT NULL DEFAULT 'APPLIED', -- APPLIED / INTERVIEWING / OFFERED / RESUME_REJECTED / INTERVIEW_FAILED / DECLINED
+    reached_interview INTEGER NOT NULL DEFAULT 0,  -- 首次进入 INTERVIEWING 或 INTERVIEW_FAILED 时置 1, 只增不改 (统计用)
     resume_version TEXT DEFAULT '',
     jd_text TEXT DEFAULT '',
-    applied_at DATETIME,                        -- 拖入 APPLIED 列时自动填充
+    applied_at DATETIME,                        -- 新建/拖入 APPLIED 列时自动填充
     location TEXT DEFAULT '',
     salary_range TEXT DEFAULT '',
     contact_info TEXT DEFAULT '',
@@ -109,6 +111,8 @@ CREATE TABLE IF NOT EXISTS interviews (
 CREATE INDEX IF NOT EXISTS idx_applications_status ON applications(status);
 CREATE INDEX IF NOT EXISTS idx_interviews_application_id ON interviews(application_id);
 ```
+
+> 旧版本状态迁移（启动时自动执行）：`WISHLIST`→`APPLIED`；`REJECTED` 且有 `reached_interview`→`INTERVIEW_FAILED`，否则→`RESUME_REJECTED`；`ARCHIVED`→`DECLINED`。
 
 ## 5. Development Steps for Coding Agent
 

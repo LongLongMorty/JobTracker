@@ -15,12 +15,13 @@ export default function StatsModal({stats, onClose}: Props) {
 
     const metrics = s
         ? [
-              {label: '累计投递', value: String(s.total_applied), sub: `记录 ${s.total_applications}`},
+              {label: '累计投递', value: String(s.total_applications), sub: '全部记录'},
               {label: '面试率', value: pct(s.interview_rate), sub: `进入面试 ${s.reached_interview}`},
               {label: 'Offer 率', value: pct(s.offer_rate), sub: `Offer ${s.offered}`},
               {label: '面试中', value: String(s.interviewing), sub: '进行中'},
-              {label: '未通过', value: String(s.rejected), sub: '可复盘'},
-              {label: '已归档', value: String(s.archived), sub: '—'},
+              {label: '简历挂', value: String(s.resume_rejected), sub: '简历阶段'},
+              {label: '面试挂', value: String(s.interview_failed), sub: '面试阶段'},
+              {label: '已拒绝', value: String(s.declined), sub: '我拒绝对方'},
           ]
         : [];
 
@@ -29,7 +30,7 @@ export default function StatsModal({stats, onClose}: Props) {
             <div className="space-y-6">
                 {s ? (
                     <>
-                        <div className="grid grid-cols-3 gap-3">
+                        <div className="grid grid-cols-4 gap-3">
                             {metrics.map((m) => (
                                 <div key={m.label} className="rounded-xl border border-slate-200 bg-slate-50/50 p-3.5">
                                     <div className="text-[11px] text-slate-400">{m.label}</div>

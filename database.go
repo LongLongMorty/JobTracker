@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS applications (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     company TEXT NOT NULL,
     position TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'WISHLIST',
+    status TEXT NOT NULL DEFAULT 'APPLIED',
     reached_interview INTEGER NOT NULL DEFAULT 0,
     resume_version TEXT DEFAULT '',
     jd_text TEXT DEFAULT '',
@@ -83,20 +83,66 @@ CREATE TABLE IF NOT EXISTS interviews (
 CREATE INDEX IF NOT EXISTS idx_applications_status ON applications(status);
 CREATE INDEX IF NOT EXISTS idx_interviews_application_id ON interviews(application_id);
 `
-	_, err := db.Exec(schema)
-	return err
+	if _, err := db.Exec(schema); err != nil {
+		return err
+	}
+
+	// 新增列 (旧库升级): failed_round 记录面试挂的轮次
+	has, err := columnExists("applications", "failed_round")
+	if err != nil {
+		return err
+	}
+	if !has {
+		if _, err := db.Exec(`ALTER TABLE applications ADD COLUMN failed_round INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return err
+		}
+	}
+
+	// 旧版本状态迁移 (WISHLIST/REJECTED/ARCHIVED 已废弃)
+	legacy := []string{
+		`UPDATE applications SET status = 'APPLIED' WHERE status = 'WISHLIST'`,
+		`UPDATE applications SET status = 'INTERVIEW_FAILED', reached_interview = 1 WHERE status = 'REJECTED' AND reached_interview = 1`,
+		`UPDATE applications SET status = 'RESUME_REJECTED' WHERE status = 'REJECTED'`,
+		`UPDATE applications SET status = 'DECLINED' WHERE status = 'ARCHIVED'`,
+	}
+	for _, stmt := range legacy {
+		if _, err := db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// columnExists 检查某列是否存在
+func columnExists(table, column string) (bool, error) {
+	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid, notnull, pk int
+		var name, typ, dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			return false, err
+		}
+		if name.String == column {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 // ---- Applications ----
 
 const applicationCols = `id, company, position, status, reached_interview, resume_version, jd_text,
-	applied_at, location, salary_range, contact_info, notes, created_at, updated_at`
+	applied_at, location, salary_range, contact_info, notes, created_at, updated_at, failed_round`
 
 func scanApplication(row interface{ Scan(...any) error }) (*Application, error) {
 	var a Application
 	err := row.Scan(&a.ID, &a.Company, &a.Position, &a.Status, &a.ReachedInterview,
 		&a.ResumeVersion, &a.JDText, &a.AppliedAt, &a.Location, &a.SalaryRange,
-		&a.ContactInfo, &a.Notes, &a.CreatedAt, &a.UpdatedAt)
+		&a.ContactInfo, &a.Notes, &a.CreatedAt, &a.UpdatedAt, &a.FailedRound)
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +169,7 @@ func listApplications() ([]*Application, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var apps []*Application
+	apps := []*Application{}
 	for rows.Next() {
 		a, err := scanApplication(rows)
 		if err != nil {
@@ -135,10 +181,18 @@ func listApplications() ([]*Application, error) {
 }
 
 func insertApplication(in ApplicationInput) (*Application, error) {
+	appliedAt := in.AppliedAt
+	if appliedAt == "" {
+		appliedAt = time.Now().Format("2006-01-02")
+	}
+	status := strings.ToUpper(strings.TrimSpace(in.Status))
+	if status == "" {
+		status = StatusApplied
+	}
 	res, err := db.Exec(`INSERT INTO applications
 		(company, position, status, resume_version, jd_text, applied_at, location, salary_range, contact_info, notes)
-		VALUES (?, ?, 'WISHLIST', ?, ?, ?, ?, ?, ?, ?)`,
-		in.Company, in.Position, in.ResumeVersion, in.JDText, in.AppliedAt,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		in.Company, in.Position, status, in.ResumeVersion, in.JDText, appliedAt,
 		in.Location, in.SalaryRange, in.ContactInfo, in.Notes)
 	if err != nil {
 		return nil, err
@@ -162,7 +216,8 @@ func updateApplication(id int64, in ApplicationInput) (*Application, error) {
 
 // updateApplicationStatus 更新状态, 并处理:
 //   - 进入 APPLIED 且 applied_at 为空时自动填充当天日期
-//   - 首次进入 INTERVIEWING 时 reached_interview 置 1 (只增不改)
+//   - 进入 INTERVIEWING / INTERVIEW_FAILED 时 reached_interview 置 1 (只增不改)
+//   - 离开 INTERVIEW_FAILED 时重算/清除 failed_round
 func updateApplicationStatus(id int64, status string) (*Application, error) {
 	status = strings.ToUpper(strings.TrimSpace(status))
 	a, err := getApplication(id)
@@ -170,15 +225,24 @@ func updateApplicationStatus(id int64, status string) (*Application, error) {
 		return nil, err
 	}
 	appliedAt := a.AppliedAt
-	if status == "APPLIED" && appliedAt == "" {
+	if status == StatusApplied && appliedAt == "" {
 		appliedAt = time.Now().Format("2006-01-02")
 	}
 	reached := a.ReachedInterview
-	if status == "INTERVIEWING" && reached == 0 {
+	if (status == StatusInterviewing || status == StatusInterviewFailed) && reached == 0 {
 		reached = 1
 	}
-	_, err = db.Exec(`UPDATE applications SET status = ?, applied_at = ?, reached_interview = ? WHERE id = ?`,
-		status, appliedAt, reached, id)
+	round := a.FailedRound
+	if status != StatusInterviewFailed {
+		// 拖离面试挂: 根据现有 FAILED 面试重算 (通常为 0)
+		r, err := computeFailedRound(id)
+		if err != nil {
+			return nil, err
+		}
+		round = r
+	}
+	_, err = db.Exec(`UPDATE applications SET status = ?, applied_at = ?, reached_interview = ?, failed_round = ? WHERE id = ?`,
+		status, appliedAt, reached, round, id)
 	if err != nil {
 		return nil, err
 	}
@@ -210,7 +274,7 @@ func listInterviews(applicationID int64) ([]*Interview, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var ivs []*Interview
+	ivs := []*Interview{}
 	for rows.Next() {
 		iv, err := scanInterview(rows)
 		if err != nil {
@@ -235,11 +299,19 @@ func insertInterview(in InterviewInput) (*Interview, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := syncStatusOnOutcome(iv.ApplicationID, "", iv.Outcome); err != nil {
+		return nil, err
+	}
 	return &iv, nil
 }
 
 func updateInterview(id int64, in InterviewInput) (*Interview, error) {
-	_, err := db.Exec(`UPDATE interviews SET round_name = ?, scheduled_at = ?, questions_and_notes = ?, outcome = ? WHERE id = ?`,
+	var oldOutcome string
+	err := db.QueryRow("SELECT outcome FROM interviews WHERE id = ?", id).Scan(&oldOutcome)
+	if err != nil {
+		return nil, err
+	}
+	_, err = db.Exec(`UPDATE interviews SET round_name = ?, scheduled_at = ?, questions_and_notes = ?, outcome = ? WHERE id = ?`,
 		in.RoundName, in.ScheduledAt, in.QuestionsAndNotes, defaultOutcome(in.Outcome), id)
 	if err != nil {
 		return nil, err
@@ -250,7 +322,65 @@ func updateInterview(id int64, in InterviewInput) (*Interview, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := syncStatusOnOutcome(iv.ApplicationID, oldOutcome, iv.Outcome); err != nil {
+		return nil, err
+	}
 	return &iv, nil
+}
+
+// syncStatusOnOutcome 面试结果与申请状态自动同步:
+//   - 某轮面试标记为 FAILED → 卡片自动移到面试挂, 并记录挂的轮次
+//   - 从 FAILED 改回 PASSED/PENDING 且当前是面试挂 → 回到面试中
+func syncStatusOnOutcome(applicationID int64, oldOutcome, newOutcome string) error {
+	newOutcome = strings.ToUpper(newOutcome)
+	oldOutcome = strings.ToUpper(oldOutcome)
+	if newOutcome == oldOutcome {
+		return nil
+	}
+	if newOutcome == "FAILED" {
+		if _, err := updateApplicationStatus(applicationID, StatusInterviewFailed); err != nil {
+			return err
+		}
+		round, err := computeFailedRound(applicationID)
+		if err != nil {
+			return err
+		}
+		_, err = db.Exec("UPDATE applications SET failed_round = ? WHERE id = ?", round, applicationID)
+		return err
+	}
+	if oldOutcome == "FAILED" {
+		a, err := getApplication(applicationID)
+		if err != nil {
+			return err
+		}
+		if a.Status == StatusInterviewFailed {
+			_, err := updateApplicationStatus(applicationID, StatusInterviewing)
+			return err
+		}
+	}
+	return nil
+}
+
+// computeFailedRound 计算该申请挂在第几轮:
+// 按面试时间 (scheduled_at, 时间相同再按 id) 排序, FAILED 那条面试的 1-based 序号; 无 FAILED 面试则返回 0
+func computeFailedRound(applicationID int64) (int64, error) {
+	rows, err := db.Query(`SELECT outcome FROM interviews WHERE application_id = ? ORDER BY scheduled_at, id`, applicationID)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	var round int64
+	for rows.Next() {
+		var outcome string
+		if err := rows.Scan(&outcome); err != nil {
+			return 0, err
+		}
+		round++
+		if strings.ToUpper(outcome) == "FAILED" {
+			return round, nil
+		}
+	}
+	return 0, rows.Err()
 }
 
 func deleteInterview(id int64) error {
@@ -269,28 +399,27 @@ func defaultOutcome(o string) string {
 
 func getStats() (*Stats, error) {
 	var s Stats
+	s.ByResumeVersion = []ResumeVersionStat{}
 	err := db.QueryRow(`SELECT
 		COUNT(*) AS total,
-		SUM(CASE WHEN status IN ('APPLIED','INTERVIEWING','OFFERED','REJECTED') THEN 1 ELSE 0 END) AS applied,
-		SUM(CASE WHEN status = 'INTERVIEWING' THEN 1 ELSE 0 END) AS interviewing,
-		SUM(reached_interview) AS reached,
-		SUM(CASE WHEN status = 'OFFERED' THEN 1 ELSE 0 END) AS offered,
-		SUM(CASE WHEN status = 'REJECTED' THEN 1 ELSE 0 END) AS rejected,
-		SUM(CASE WHEN status = 'ARCHIVED' THEN 1 ELSE 0 END) AS archived
+		COALESCE(SUM(CASE WHEN status = 'INTERVIEWING' THEN 1 ELSE 0 END), 0) AS interviewing,
+		COALESCE(SUM(reached_interview), 0) AS reached,
+		COALESCE(SUM(CASE WHEN status = 'OFFERED' THEN 1 ELSE 0 END), 0) AS offered,
+		COALESCE(SUM(CASE WHEN status = 'RESUME_REJECTED' THEN 1 ELSE 0 END), 0) AS resume_rejected,
+		COALESCE(SUM(CASE WHEN status = 'INTERVIEW_FAILED' THEN 1 ELSE 0 END), 0) AS interview_failed,
+		COALESCE(SUM(CASE WHEN status = 'DECLINED' THEN 1 ELSE 0 END), 0) AS declined
 		FROM applications`).Scan(
-		&s.TotalApplications, &s.TotalApplied, &s.Interviewing, &s.ReachedInterview,
-		&s.Offered, &s.Rejected, &s.Archived)
+		&s.TotalApplications, &s.Interviewing, &s.ReachedInterview, &s.Offered,
+		&s.ResumeRejected, &s.InterviewFailed, &s.Declined)
 	if err != nil {
 		return nil, err
 	}
-	if s.TotalApplied > 0 {
-		s.InterviewRate = float64(s.ReachedInterview) / float64(s.TotalApplied)
-		s.OfferRate = float64(s.Offered) / float64(s.TotalApplied)
+	if s.TotalApplications > 0 {
+		s.InterviewRate = float64(s.ReachedInterview) / float64(s.TotalApplications)
+		s.OfferRate = float64(s.Offered) / float64(s.TotalApplications)
 	}
 
-	rows, err := db.Query(`SELECT resume_version,
-		SUM(CASE WHEN status IN ('APPLIED','INTERVIEWING','OFFERED','REJECTED') THEN 1 ELSE 0 END) AS applied,
-		SUM(reached_interview) AS reached
+	rows, err := db.Query(`SELECT resume_version, COUNT(*) AS applied, SUM(reached_interview) AS reached
 		FROM applications WHERE resume_version <> ''
 		GROUP BY resume_version ORDER BY reached DESC, applied DESC`)
 	if err != nil {

@@ -29,6 +29,7 @@ export default function App() {
     const refresh = useCallback(async () => {
         const list = await api.listApplications();
         setApps(list);
+        setStats(await api.getStats());
     }, []);
 
     useEffect(() => {
@@ -114,7 +115,7 @@ export default function App() {
                     </div>
                 </div>
 
-                <div className="relative ml-2 flex-1 max-w-md">
+                <div className="relative ml-2 min-w-0 flex-1 max-w-md">
                     <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
                     <input
                         value={search}
@@ -124,16 +125,16 @@ export default function App() {
                     />
                 </div>
 
-                {/* 快速指标 */}
-                <div className="ml-auto flex items-center gap-2 font-mono text-xs text-slate-500">
-                    <span>已投 <b className="text-slate-800">{stats ? stats.total_applied : '–'}</b></span>
+                {/* 快速指标 (窄窗口隐藏, 避免头部溢出) */}
+                <div className="ml-auto hidden shrink-0 items-center gap-2 font-mono text-xs text-slate-500 xl:flex">
+                    <span>已投 <b className="text-slate-800">{stats ? stats.total_applications : '–'}</b></span>
                     <span className="text-slate-200">|</span>
                     <span>面试率 <b className="text-amber-600">{stats ? Math.round(stats.interview_rate * 100) + '%' : '–'}</b></span>
                     <span className="text-slate-200">|</span>
                     <span>Offer <b className="text-emerald-600">{stats ? Math.round(stats.offer_rate * 100) + '%' : '–'}</b></span>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex shrink-0 items-center gap-2">
                     <button
                         type="button"
                         onClick={openStats}
@@ -152,7 +153,7 @@ export default function App() {
                     </button>
                     <button
                         type="button"
-                        onClick={() => setModal({app: null, status: 'WISHLIST'})}
+                        onClick={() => setModal({app: null, status: 'APPLIED'})}
                         className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-amber-700 transition-colors"
                     >
                         <Plus size={16}/>

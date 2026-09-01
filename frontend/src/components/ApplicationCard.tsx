@@ -10,6 +10,7 @@ interface Props {
 export default function ApplicationCard({app, onOpen}: Props) {
     const meta = STATUS_META[app.status];
     const interviewCount = app.interviews?.length ?? 0;
+    const failedRound = app.status === 'INTERVIEW_FAILED' && app.failed_round > 0 ? app.failed_round : 0;
 
     return (
         <div
@@ -38,6 +39,11 @@ export default function ApplicationCard({app, onOpen}: Props) {
             </div>
 
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2.5 text-[11px] text-slate-400">
+                {failedRound > 0 && (
+                    <span className="rounded-full bg-red-50 px-1.5 py-0.5 font-medium text-red-600">
+                        第{failedRound}轮挂
+                    </span>
+                )}
                 {app.resume_version && (
                     <span className="font-mono text-slate-500">{app.resume_version}</span>
                 )}

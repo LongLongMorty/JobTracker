@@ -1,10 +1,10 @@
 export type Status =
-    | 'WISHLIST'
     | 'APPLIED'
     | 'INTERVIEWING'
     | 'OFFERED'
-    | 'REJECTED'
-    | 'ARCHIVED';
+    | 'RESUME_REJECTED'
+    | 'INTERVIEW_FAILED'
+    | 'DECLINED';
 
 export interface Application {
     id: number;
@@ -19,6 +19,7 @@ export interface Application {
     contact_info: string;
     notes: string;
     reached_interview: number;
+    failed_round: number;
     created_at: string;
     updated_at: string;
     interviews?: Interview[];
@@ -34,6 +35,7 @@ export interface ApplicationInput {
     salary_range: string;
     contact_info: string;
     notes: string;
+    status: string; // 仅创建时生效
 }
 
 export interface Interview {
@@ -56,12 +58,12 @@ export interface InterviewInput {
 
 export interface Stats {
     total_applications: number;
-    total_applied: number;
     interviewing: number;
     reached_interview: number;
     offered: number;
-    rejected: number;
-    archived: number;
+    resume_rejected: number;
+    interview_failed: number;
+    declined: number;
     interview_rate: number;
     offer_rate: number;
     by_resume_version: ResumeVersionStat[];

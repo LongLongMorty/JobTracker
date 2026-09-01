@@ -7,7 +7,7 @@ import (
 
 func openTestDB(t *testing.T) {
 	t.Helper()
-	d, err := sql.Open("sqlite", "file::memory:?cache=shared&_pragma=foreign_keys(1)")
+	d, err := sql.Open("sqlite", "file:memdb"+t.Name()+"?mode=memory&cache=shared&_pragma=foreign_keys(1)")
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -21,25 +21,20 @@ func openTestDB(t *testing.T) {
 func TestApplicationLifecycle(t *testing.T) {
 	openTestDB(t)
 
+	// 新建记录默认 APPLIED, 且自动填充投递日期
 	a, err := insertApplication(ApplicationInput{Company: "Acme", Position: "Backend Engineer", ResumeVersion: "v1.0"})
 	if err != nil {
 		t.Fatalf("insert: %v", err)
 	}
-	if a.Status != "WISHLIST" {
-		t.Fatalf("expected WISHLIST, got %s", a.Status)
-	}
-
-	// 状态 -> APPLIED 应自动填充 applied_at
-	a, err = updateApplicationStatus(a.ID, "APPLIED")
-	if err != nil {
-		t.Fatalf("update status: %v", err)
+	if a.Status != StatusApplied {
+		t.Fatalf("expected APPLIED, got %s", a.Status)
 	}
 	if a.AppliedAt == "" {
-		t.Fatal("applied_at should be auto-filled")
+		t.Fatal("applied_at should be auto-filled on insert")
 	}
 
-	// 状态 -> INTERVIEWING 应置 reached_interview = 1
-	a, err = updateApplicationStatus(a.ID, "INTERVIEWING")
+	// 进入 INTERVIEWING 置 reached_interview = 1
+	a, err = updateApplicationStatus(a.ID, StatusInterviewing)
 	if err != nil {
 		t.Fatalf("update status: %v", err)
 	}
@@ -47,52 +42,163 @@ func TestApplicationLifecycle(t *testing.T) {
 		t.Fatalf("reached_interview should be 1, got %d", a.ReachedInterview)
 	}
 
-	// 状态再变不会重置 reached_interview
-	a, err = updateApplicationStatus(a.ID, "OFFERED")
-	if err != nil {
-		t.Fatalf("update status: %v", err)
-	}
-	if a.ReachedInterview != 1 {
-		t.Fatalf("reached_interview should stay 1, got %d", a.ReachedInterview)
-	}
-
-	// 面试记录
-	iv, err := insertInterview(InterviewInput{ApplicationID: a.ID, RoundName: "1st Technical", ScheduledAt: "2026-09-05T10:00"})
+	// 面试记录标记 FAILED → 申请自动变为面试挂, 记录轮次
+	iv, err := insertInterview(InterviewInput{ApplicationID: a.ID, RoundName: "1st Technical", ScheduledAt: "2026-09-05T10:00", Outcome: "FAILED"})
 	if err != nil {
 		t.Fatalf("insert interview: %v", err)
 	}
-	if iv.Outcome != "PENDING" {
-		t.Fatalf("expected PENDING, got %s", iv.Outcome)
+	a, _ = getApplication(a.ID)
+	if a.Status != StatusInterviewFailed {
+		t.Fatalf("expected INTERVIEW_FAILED after FAILED interview, got %s", a.Status)
 	}
-	ivs, err := listInterviews(a.ID)
-	if err != nil || len(ivs) != 1 {
-		t.Fatalf("list interviews: %v len=%d", err, len(ivs))
+	if a.FailedRound != 1 {
+		t.Fatalf("failed_round should be 1, got %d", a.FailedRound)
+	}
+
+	// 面试结果改回 PASSED → 状态回到面试中, 轮次清除
+	if _, err = updateInterview(iv.ID, InterviewInput{ApplicationID: a.ID, RoundName: "1st Technical", ScheduledAt: "2026-09-05T10:00", Outcome: "PASSED"}); err != nil {
+		t.Fatalf("update interview: %v", err)
+	}
+	a, _ = getApplication(a.ID)
+	if a.Status != StatusInterviewing {
+		t.Fatalf("expected INTERVIEWING after outcome reverted, got %s", a.Status)
+	}
+	if a.FailedRound != 0 {
+		t.Fatalf("failed_round should be cleared, got %d", a.FailedRound)
+	}
+
+	// 第二轮面试 FAILED → 轮次应为 2
+	iv1 := iv
+	iv2, err := insertInterview(InterviewInput{ApplicationID: a.ID, RoundName: "2nd Technical", ScheduledAt: "2026-09-08T14:00", Outcome: "FAILED"})
+	if err != nil {
+		t.Fatalf("insert 2nd interview: %v", err)
+	}
+	a, _ = getApplication(a.ID)
+	if a.Status != StatusInterviewFailed || a.FailedRound != 2 {
+		t.Fatalf("expected INTERVIEW_FAILED round 2, got %s/%d", a.Status, a.FailedRound)
+	}
+
+	// 手动拖离面试挂 → failed_round 重算 (仍有 FAILED 面试时保留轮次)
+	if _, err = updateApplicationStatus(a.ID, StatusApplied); err != nil {
+		t.Fatalf("drag away: %v", err)
+	}
+	a, _ = getApplication(a.ID)
+	if a.FailedRound != 2 {
+		t.Fatalf("failed_round should stay 2 while FAILED interview exists, got %d", a.FailedRound)
+	}
+	_ = iv1
+	_ = iv2
+
+	// 补录场景: 先创建时间晚的面试, 再补录时间早的并标记 FAILED
+	// 轮次应按面试时间排序 → 补录的"1st"时间最早 → 挂在第 1 轮
+	c, err := insertApplication(ApplicationInput{Company: "Gamma", Position: "Ops"})
+	if err != nil {
+		t.Fatalf("insert c: %v", err)
+	}
+	late, err := insertInterview(InterviewInput{ApplicationID: c.ID, RoundName: "2nd Technical", ScheduledAt: "2026-09-08T14:00", Outcome: "PASSED"})
+	if err != nil {
+		t.Fatalf("insert late interview: %v", err)
+	}
+	early, err := insertInterview(InterviewInput{ApplicationID: c.ID, RoundName: "1st Technical", ScheduledAt: "2026-09-05T10:00", Outcome: "PASSED"})
+	if err != nil {
+		t.Fatalf("insert early interview: %v", err)
+	}
+	// 把补录的"1st"标记为 FAILED → 应按时间排序挂在第 1 轮
+	if _, err = updateInterview(early.ID, InterviewInput{ApplicationID: c.ID, RoundName: "1st Technical", ScheduledAt: "2026-09-05T10:00", Outcome: "FAILED"}); err != nil {
+		t.Fatalf("fail early interview: %v", err)
+	}
+	c, _ = getApplication(c.ID)
+	if c.Status != StatusInterviewFailed || c.FailedRound != 1 {
+		t.Fatalf("expected INTERVIEW_FAILED round 1 (time-sorted), got %s/%d", c.Status, c.FailedRound)
+	}
+	// 若改为按创建顺序则会是 2, 校验区分
+	_ = late
+
+	// 创建时显式指定其他状态 (如已拒绝)
+	b, err := insertApplication(ApplicationInput{Company: "Beta", Position: "FE", ResumeVersion: "v2.0", Status: StatusDeclined})
+	if err != nil {
+		t.Fatalf("insert b: %v", err)
+	}
+	if b.Status != StatusDeclined {
+		t.Fatalf("expected DECLINED, got %s", b.Status)
+	}
+
+	// 统计: 3 条记录 (Acme/Beta/Gamma), 2 条进过面试
+	st, err := getStats()
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if st.TotalApplications != 3 || st.ReachedInterview != 2 || st.Offered != 0 {
+		t.Fatalf("stats mismatch: %+v", st)
+	}
+	if st.InterviewRate <= 0.665 || st.InterviewRate >= 0.667 {
+		t.Fatalf("interview rate should be 2/3, got %f", st.InterviewRate)
+	}
+	if len(st.ByResumeVersion) != 2 {
+		t.Fatalf("expected 2 resume version stats, got %d", len(st.ByResumeVersion))
 	}
 
 	// 级联删除
 	if err := deleteApplication(a.ID); err != nil {
 		t.Fatalf("delete app: %v", err)
 	}
-	ivs, _ = listInterviews(a.ID)
+	ivs, _ := listInterviews(a.ID)
 	if len(ivs) != 0 {
 		t.Fatal("interviews should be cascade deleted")
 	}
+}
 
-	// 统计
-	b, _ := insertApplication(ApplicationInput{Company: "Beta", Position: "FE", ResumeVersion: "v2.0"})
-	updateApplicationStatus(b.ID, "APPLIED")
-	updateApplicationStatus(b.ID, "INTERVIEWING")
+func TestLegacyStatusMigration(t *testing.T) {
+	openTestDB(t)
+
+	// 模拟旧版本数据
+	res, err := db.Exec(`INSERT INTO applications (company, position, status, reached_interview) VALUES ('Old', 'X', 'WISHLIST', 0)`)
+	if err != nil {
+		t.Fatalf("seed legacy: %v", err)
+	}
+	id, _ := res.LastInsertId()
+	db.Exec(`UPDATE applications SET status = 'REJECTED', reached_interview = 1 WHERE id = ?`, id)
+
+	if err := migrate(); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	a, err := getApplication(id)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if a.Status != StatusInterviewFailed {
+		t.Fatalf("legacy REJECTED+reached should map to INTERVIEW_FAILED, got %s", a.Status)
+	}
+}
+
+// 空数据库: 列表应返回 [] 而非 null, 统计应返回 0 而非报错
+func TestEmptyDatabase(t *testing.T) {
+	openTestDB(t)
+
+	apps, err := listApplications()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if apps == nil {
+		t.Fatal("listApplications should return empty slice, not nil")
+	}
+
+	ivs, err := listInterviews(1)
+	if err != nil {
+		t.Fatalf("list interviews: %v", err)
+	}
+	if ivs == nil {
+		t.Fatal("listInterviews should return empty slice, not nil")
+	}
+
 	st, err := getStats()
 	if err != nil {
-		t.Fatalf("stats: %v", err)
+		t.Fatalf("stats on empty db: %v", err)
 	}
-	if st.ReachedInterview != 1 || st.TotalApplied != 1 {
-		t.Fatalf("stats mismatch: %+v", st)
+	if st.TotalApplications != 0 || st.InterviewRate != 0 || st.OfferRate != 0 {
+		t.Fatalf("empty stats mismatch: %+v", st)
 	}
-	if len(st.ByResumeVersion) != 1 {
-		t.Fatalf("expected 1 resume version stat, got %d", len(st.ByResumeVersion))
-	}
-	if st.ByResumeVersion[0].ResumeVersion != "v2.0" || st.ByResumeVersion[0].ReachedInterview != 1 {
-		t.Fatalf("unexpected resume stat: %+v", st.ByResumeVersion[0])
+	if st.ByResumeVersion == nil {
+		t.Fatal("by_resume_version should be empty slice, not nil")
 	}
 }

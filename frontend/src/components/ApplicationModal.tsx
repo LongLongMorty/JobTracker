@@ -20,6 +20,7 @@ const EMPTY = {
     contact_info: '',
     jd_text: '',
     notes: '',
+    status: '',
 };
 
 export default function ApplicationModal({initial, defaultStatus, onClose, onSave}: Props) {
@@ -33,6 +34,7 @@ export default function ApplicationModal({initial, defaultStatus, onClose, onSav
                   contact_info: initial.contact_info,
                   jd_text: initial.jd_text,
                   notes: initial.notes,
+                  status: initial.status,
               }
             : {...EMPTY},
     );
@@ -51,7 +53,7 @@ export default function ApplicationModal({initial, defaultStatus, onClose, onSav
         setError('');
         setSaving(true);
         try {
-            await onSave({...form, company: company.trim(), position: position.trim()}, initial?.id ?? null);
+            await onSave({...form, company: company.trim(), position: position.trim(), status: initial ? initial.status : defaultStatus}, initial?.id ?? null);
         } catch (e: any) {
             setError(String(e?.message ?? e));
             setSaving(false);

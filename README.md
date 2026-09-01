@@ -4,10 +4,11 @@
 
 ## 功能
 
-- **Kanban 看板**：6 个状态列 —— 准备投递 / 已投递 / 面试中 / Offer / 未通过 / 已归档
+- **Kanban 看板**：6 个状态列 —— 已投递 / 面试中 / Offer / 简历挂 / 面试挂 / 已拒绝（我拒绝对方）
   - 拖拽卡片即可更新状态
-  - 拖入「已投递」自动填充投递日期
-  - 首次进入「面试中」自动标记 `reached_interview`（用于面试率统计，只增不改）
+  - 新建记录或拖入「已投递」时自动填充投递日期
+  - 首次进入「面试中」或「面试挂」自动标记 `reached_interview`（用于面试率统计，只增不改）
+- **面试挂自动同步**：任一轮面试标记为「未通过」时，卡片自动移到「面试挂」列；改回后自动回到「面试中」
 - **投递详情**：公司、岗位、简历版本、JD 原文、薪资、地点、联系方式、Markdown 备注
 - **面试记录**：每个投递可添加多轮面试（轮次名称、时间、结果、Markdown 问题与复盘笔记）
 - **统计**：投递总数 / 面试率 / Offer 率，以及按简历版本统计面试转化率
@@ -61,7 +62,8 @@ wails build
 
 ## 数据库 Schema
 
-- `applications`：投递记录（含 `status`、`reached_interview`、`applied_at` 等）
+- `applications`：投递记录（`status`：APPLIED / INTERVIEWING / OFFERED / RESUME_REJECTED / INTERVIEW_FAILED / DECLINED，含 `reached_interview`、`applied_at` 等）
 - `interviews`：面试记录（`application_id` 外键，级联删除）
 - 触发器：`applications` 更新时自动刷新 `updated_at`
 - 索引：`status` 与 `application_id`
+- 旧版本状态（WISHLIST / REJECTED / ARCHIVED）启动时自动迁移到新状态集

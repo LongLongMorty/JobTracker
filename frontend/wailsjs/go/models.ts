@@ -37,6 +37,7 @@ export namespace main {
 	    contact_info: string;
 	    notes: string;
 	    reached_interview: number;
+	    failed_round: number;
 	    created_at: string;
 	    updated_at: string;
 	    interviews?: Interview[];
@@ -59,6 +60,7 @@ export namespace main {
 	        this.contact_info = source["contact_info"];
 	        this.notes = source["notes"];
 	        this.reached_interview = source["reached_interview"];
+	        this.failed_round = source["failed_round"];
 	        this.created_at = source["created_at"];
 	        this.updated_at = source["updated_at"];
 	        this.interviews = this.convertValues(source["interviews"], Interview);
@@ -92,6 +94,7 @@ export namespace main {
 	    salary_range: string;
 	    contact_info: string;
 	    notes: string;
+	    status: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ApplicationInput(source);
@@ -108,6 +111,7 @@ export namespace main {
 	        this.salary_range = source["salary_range"];
 	        this.contact_info = source["contact_info"];
 	        this.notes = source["notes"];
+	        this.status = source["status"];
 	    }
 	}
 	
@@ -151,12 +155,12 @@ export namespace main {
 	}
 	export class Stats {
 	    total_applications: number;
-	    total_applied: number;
 	    interviewing: number;
 	    reached_interview: number;
 	    offered: number;
-	    rejected: number;
-	    archived: number;
+	    resume_rejected: number;
+	    interview_failed: number;
+	    declined: number;
 	    interview_rate: number;
 	    offer_rate: number;
 	    by_resume_version: ResumeVersionStat[];
@@ -168,12 +172,12 @@ export namespace main {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.total_applications = source["total_applications"];
-	        this.total_applied = source["total_applied"];
 	        this.interviewing = source["interviewing"];
 	        this.reached_interview = source["reached_interview"];
 	        this.offered = source["offered"];
-	        this.rejected = source["rejected"];
-	        this.archived = source["archived"];
+	        this.resume_rejected = source["resume_rejected"];
+	        this.interview_failed = source["interview_failed"];
+	        this.declined = source["declined"];
 	        this.interview_rate = source["interview_rate"];
 	        this.offer_rate = source["offer_rate"];
 	        this.by_resume_version = this.convertValues(source["by_resume_version"], ResumeVersionStat);
