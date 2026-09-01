@@ -1,0 +1,64 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+  --font-mono: "Cascadia Mono", "JetBrains Mono", Consolas, "Courier New", monospace;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: #eef1f5;
+  color: #1f2430;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 细滚动条, 契合工作台质感 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #c7cdd6 transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #c7cdd6;
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 键盘焦点可见 */
+:focus-visible {
+  outline: 2px solid #d97706;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+/* Markdown 预览样式 */
+.md-body { line-height: 1.6; color: #374151; }
+.md-body h1, .md-body h2, .md-body h3 { font-weight: 600; margin: 0.6em 0 0.3em; }
+.md-body h1 { font-size: 1.2em; }
+.md-body h2 { font-size: 1.1em; }
+.md-body h3 { font-size: 1em; }
+.md-body p { margin: 0.35em 0; }
+.md-body ul, .md-body ol { margin: 0.35em 0; padding-left: 1.4em; }
+.md-body ul { list-style: disc; }
+.md-body ol { list-style: decimal; }
+.md-body li { margin: 0.15em 0; }
+.md-body code { font-family: var(--font-mono); font-size: 0.9em; background: #f1f5f9; padding: 0.1em 0.35em; border-radius: 4px; }
+.md-body pre { background: #1f2430; color: #e5e7eb; padding: 0.75em; border-radius: 8px; overflow: auto; }
+.md-body pre code { background: transparent; padding: 0; }
+.md-body blockquote { border-left: 3px solid #cbd5e1; padding-left: 0.8em; color: #6b7280; margin: 0.4em 0; }
+.md-body a { color: #b45309; text-decoration: underline; }
