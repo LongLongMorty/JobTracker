@@ -10,12 +10,20 @@ export function CreateInterview(arg1) {
   return window['go']['main']['App']['CreateInterview'](arg1);
 }
 
+export function CreateQAItem(arg1) {
+  return window['go']['main']['App']['CreateQAItem'](arg1);
+}
+
 export function DeleteApplication(arg1) {
   return window['go']['main']['App']['DeleteApplication'](arg1);
 }
 
 export function DeleteInterview(arg1) {
   return window['go']['main']['App']['DeleteInterview'](arg1);
+}
+
+export function DeleteQAItem(arg1) {
+  return window['go']['main']['App']['DeleteQAItem'](arg1);
 }
 
 export function ExportData() {
@@ -48,4 +56,8 @@ export function UpdateApplicationStatus(arg1, arg2) {
 
 export function UpdateInterview(arg1, arg2) {
   return window['go']['main']['App']['UpdateInterview'](arg1, arg2);
+}
+
+export function UpdateQAItem(arg1, arg2) {
+  return window['go']['main']['App']['UpdateQAItem'](arg1, arg2);
 }

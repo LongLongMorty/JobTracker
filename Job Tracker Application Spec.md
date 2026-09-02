@@ -52,9 +52,13 @@ A lightweight, single-user desktop application designed to track and manage job 
   - `application_id`: INTEGER (FK)
   - `round_name`: TEXT (e.g., "1st Technical", "HR Round")
   - `scheduled_at`: DATETIME
-  - `questions_and_notes`: TEXT (Markdown: Question Bank, Answers, Improvements)
+  - `questions_and_notes`: TEXT (Markdown: 整体复盘)
   - `outcome`: ENUM (`PENDING`, `PASSED`, `FAILED`)
-- 某轮面试标记为 `FAILED` 时自动把所属申请的 `status` 同步为 `INTERVIEW_FAILED` (从 `FAILED` 改回时若状态为 `INTERVIEW_FAILED` 则回到 `INTERVIEWING`)
+- **逐条问题记录** (`interview_qa` 表, 面试 `1-to-N` 问题条目):
+  - 每条: `question` (问题) / `answer` (我的回答) / `reflection` (复盘改进)
+  - 增删改即时保存 (失焦自动保存, 删除即时生效), `sort_order` 保持顺序
+  - 面试记录列表接口自动带出 `qa_items`
+- 某轮面试标记为 `FAILED` 时自动把所属申请的 `status` 同步为 `INTERVIEW_FAILED`, 并按**面试时间**排序计算挂的轮次写入 `failed_round` (从 `FAILED` 改回时若状态为 `INTERVIEW_FAILED` 则回到 `INTERVIEWING` 并重算轮次)
 
 ### Feature 4: Basic Analytics (Stats Drawer/Modal)
 
@@ -108,9 +112,23 @@ CREATE TABLE IF NOT EXISTS interviews (
     FOREIGN KEY(application_id) REFERENCES applications(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS interview_qa (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    interview_id INTEGER NOT NULL,
+    question TEXT NOT NULL DEFAULT '',
+    answer TEXT DEFAULT '',
+    reflection TEXT DEFAULT '',
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(interview_id) REFERENCES interviews(id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_applications_status ON applications(status);
 CREATE INDEX IF NOT EXISTS idx_interviews_application_id ON interviews(application_id);
+CREATE INDEX IF NOT EXISTS idx_qa_interview_id ON interview_qa(interview_id);
 ```
+
+> `applications.failed_round`: 面试挂时的轮次 (按面试时间排序, 由 FAILED 面试自动计算)。
 
 > 旧版本状态迁移（启动时自动执行）：`WISHLIST`→`APPLIED`；`REJECTED` 且有 `reached_interview`→`INTERVIEW_FAILED`，否则→`RESUME_REJECTED`；`ARCHIVED`→`DECLINED`。
 

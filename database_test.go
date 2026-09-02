@@ -114,6 +114,83 @@ func TestApplicationLifecycle(t *testing.T) {
 	// 若改为按创建顺序则会是 2, 校验区分
 	_ = late
 
+	// 逐条问题记录: 增删改查
+	qa, err := insertQAItem(QAItemInput{InterviewID: iv2.ID, Question: "如何设计高并发系统？", Answer: "分片+缓存", Reflection: "多聊限流"})
+	if err != nil {
+		t.Fatalf("insert qa: %v", err)
+	}
+	if qa.SortOrder != 1 {
+		t.Fatalf("sort_order should be 1, got %d", qa.SortOrder)
+	}
+	qa2, err := insertQAItem(QAItemInput{InterviewID: iv2.ID, Question: "HTTP 与 HTTPS 区别？", Answer: "TLS", Reflection: ""})
+	if err != nil {
+		t.Fatalf("insert qa2: %v", err)
+	}
+	if qa2.SortOrder != 2 {
+		t.Fatalf("sort_order should be 2, got %d", qa2.SortOrder)
+	}
+	items, err := listQAItems(iv2.ID)
+	if err != nil || len(items) != 2 {
+		t.Fatalf("list qa: %v len=%d", err, len(items))
+	}
+	if items[0].Question != "如何设计高并发系统？" {
+		t.Fatalf("qa order wrong: %s", items[0].Question)
+	}
+	updated, err := updateQAItem(qa.ID, QAItemInput{InterviewID: iv2.ID, Question: "如何设计高并发订单系统？", Answer: "分片+缓存+MQ", Reflection: "注意热点拆分"})
+	if err != nil || updated.Question != "如何设计高并发订单系统？" {
+		t.Fatalf("update qa: %v %+v", err, updated)
+	}
+	// 插入到中间位置: sort_order 重排 ([qa(1), qa2(2)] → [qa(1), mid(2), qa2(3)])
+	mid, err := insertQAItem(QAItemInput{InterviewID: iv2.ID, Question: "插入中间的问题？", Answer: "", Reflection: "", SortOrder: 2})
+	if err != nil {
+		t.Fatalf("insert mid qa: %v", err)
+	}
+	if mid.SortOrder != 2 {
+		t.Fatalf("mid sort_order should be 2, got %d", mid.SortOrder)
+	}
+	items, _ = listQAItems(iv2.ID)
+	if len(items) != 3 {
+		t.Fatalf("after mid insert, len should be 3, got %d", len(items))
+	}
+	want := []string{"如何设计高并发订单系统？", "插入中间的问题？", "HTTP 与 HTTPS 区别？"}
+	for i, it := range items {
+		if it.Question != want[i] {
+			t.Fatalf("order wrong at %d: got %q want %q", i, it.Question, want[i])
+		}
+	}
+	// 删除中间条目后顺序连续
+	if err := deleteQAItem(mid.ID); err != nil {
+		t.Fatalf("delete mid qa: %v", err)
+	}
+	items, _ = listQAItems(iv2.ID)
+	if items[1].Question != "HTTP 与 HTTPS 区别？" || items[1].SortOrder != 2 {
+		t.Fatalf("after delete mid, order should be compact: %+v", items)
+	}
+	// 删除末尾条目
+	if err := deleteQAItem(qa2.ID); err != nil {
+		t.Fatalf("delete qa2: %v", err)
+	}
+	items, _ = listQAItems(iv2.ID)
+	if len(items) != 1 {
+		t.Fatalf("after delete, qa len should be 1, got %d", len(items))
+	}
+	// 面试记录应带出 QA
+	ivs, _ := listInterviews(a.ID)
+	for _, iv := range ivs {
+		if iv.ID == iv2.ID && len(iv.QAItems) != 1 {
+			t.Fatalf("interview should carry qa items, got %d", len(iv.QAItems))
+		}
+	}
+
+	// 删除整个面试 → QA 级联删除
+	if err := deleteInterview(iv2.ID); err != nil {
+		t.Fatalf("delete interview: %v", err)
+	}
+	items, _ = listQAItems(iv2.ID)
+	if len(items) != 0 {
+		t.Fatal("qa items should be cascade deleted with interview")
+	}
+
 	// 创建时显式指定其他状态 (如已拒绝)
 	b, err := insertApplication(ApplicationInput{Company: "Beta", Position: "FE", ResumeVersion: "v2.0", Status: StatusDeclined})
 	if err != nil {
@@ -142,7 +219,7 @@ func TestApplicationLifecycle(t *testing.T) {
 	if err := deleteApplication(a.ID); err != nil {
 		t.Fatalf("delete app: %v", err)
 	}
-	ivs, _ := listInterviews(a.ID)
+	ivs, _ = listInterviews(a.ID)
 	if len(ivs) != 0 {
 		t.Fatal("interviews should be cascade deleted")
 	}

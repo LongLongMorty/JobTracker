@@ -75,6 +75,20 @@ func (a *App) DeleteInterview(id int64) error {
 	return deleteInterview(id)
 }
 
+// ---- Interview QA Items ----
+
+func (a *App) CreateQAItem(in QAItemInput) (*QAItem, error) {
+	return insertQAItem(in)
+}
+
+func (a *App) UpdateQAItem(id int64, in QAItemInput) (*QAItem, error) {
+	return updateQAItem(id, in)
+}
+
+func (a *App) DeleteQAItem(id int64) error {
+	return deleteQAItem(id)
+}
+
 // ---- Stats ----
 
 func (a *App) GetStats() (*Stats, error) {
@@ -160,14 +174,20 @@ func writeInterviewsCSV(path string, apps []*Application) error {
 	defer f.Close()
 	w := csv.NewWriter(f)
 	defer w.Flush()
-	if err := w.Write([]string{"id", "application_id", "round_name", "scheduled_at", "questions_and_notes", "outcome", "created_at"}); err != nil {
+	if err := w.Write([]string{"id", "application_id", "round_name", "scheduled_at", "questions_and_notes", "outcome", "created_at", "qa_items"}); err != nil {
 		return err
 	}
 	for _, a := range apps {
 		for _, iv := range a.Interviews {
+			qaJSON := ""
+			if len(iv.QAItems) > 0 {
+				if b, err := json.Marshal(iv.QAItems); err == nil {
+					qaJSON = string(b)
+				}
+			}
 			if err := w.Write([]string{
 				itoa(iv.ID), itoa(iv.ApplicationID), iv.RoundName, iv.ScheduledAt,
-				iv.QuestionsAndNotes, iv.Outcome, iv.CreatedAt,
+				iv.QuestionsAndNotes, iv.Outcome, iv.CreatedAt, qaJSON,
 			}); err != nil {
 				return err
 			}

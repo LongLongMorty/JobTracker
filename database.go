@@ -80,8 +80,20 @@ CREATE TABLE IF NOT EXISTS interviews (
     FOREIGN KEY(application_id) REFERENCES applications(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS interview_qa (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    interview_id INTEGER NOT NULL,
+    question TEXT NOT NULL DEFAULT '',
+    answer TEXT DEFAULT '',
+    reflection TEXT DEFAULT '',
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(interview_id) REFERENCES interviews(id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_applications_status ON applications(status);
 CREATE INDEX IF NOT EXISTS idx_interviews_application_id ON interviews(application_id);
+CREATE INDEX IF NOT EXISTS idx_qa_interview_id ON interview_qa(interview_id);
 `
 	if _, err := db.Exec(schema); err != nil {
 		return err
@@ -273,16 +285,29 @@ func listInterviews(applicationID int64) ([]*Interview, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	ivs := []*Interview{}
 	for rows.Next() {
 		iv, err := scanInterview(rows)
 		if err != nil {
+			rows.Close()
 			return nil, err
 		}
 		ivs = append(ivs, iv)
 	}
-	return ivs, rows.Err()
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	// 必须先关闭外层 rows 再嵌套查询 (SetMaxOpenConns(1) 下避免死锁)
+	rows.Close()
+	for _, iv := range ivs {
+		items, err := listQAItems(iv.ID)
+		if err != nil {
+			return nil, err
+		}
+		iv.QAItems = items
+	}
+	return ivs, nil
 }
 
 func insertInterview(in InterviewInput) (*Interview, error) {
@@ -393,6 +418,99 @@ func defaultOutcome(o string) string {
 		return "PENDING"
 	}
 	return strings.ToUpper(o)
+}
+
+// ---- Interview QA Items ----
+
+const qaCols = `id, interview_id, question, answer, reflection, sort_order, created_at`
+
+func scanQAItem(row interface{ Scan(...any) error }) (*QAItem, error) {
+	var q QAItem
+	err := row.Scan(&q.ID, &q.InterviewID, &q.Question, &q.Answer, &q.Reflection, &q.SortOrder, &q.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &q, nil
+}
+
+func listQAItems(interviewID int64) ([]*QAItem, error) {
+	rows, err := db.Query("SELECT "+qaCols+" FROM interview_qa WHERE interview_id = ? ORDER BY sort_order, id", interviewID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []*QAItem{}
+	for rows.Next() {
+		q, err := scanQAItem(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, q)
+	}
+	return items, rows.Err()
+}
+
+func insertQAItem(in QAItemInput) (*QAItem, error) {
+	if in.SortOrder > 0 {
+		// 插入到指定位置: 该位置及其后的条目后移一位
+		if _, err := db.Exec(`UPDATE interview_qa SET sort_order = sort_order + 1
+			WHERE interview_id = ? AND sort_order >= ?`, in.InterviewID, in.SortOrder); err != nil {
+			return nil, err
+		}
+	} else {
+		// 追加到末尾
+		if err := db.QueryRow(`SELECT COALESCE(MAX(sort_order), 0) + 1 FROM interview_qa WHERE interview_id = ?`,
+			in.InterviewID).Scan(&in.SortOrder); err != nil {
+			return nil, err
+		}
+	}
+	res, err := db.Exec(`INSERT INTO interview_qa (interview_id, question, answer, reflection, sort_order)
+		VALUES (?, ?, ?, ?, ?)`,
+		in.InterviewID, in.Question, in.Answer, in.Reflection, in.SortOrder)
+	if err != nil {
+		return nil, err
+	}
+	id, _ := res.LastInsertId()
+	var q QAItem
+	err = db.QueryRow("SELECT "+qaCols+" FROM interview_qa WHERE id = ?", id).Scan(
+		&q.ID, &q.InterviewID, &q.Question, &q.Answer, &q.Reflection, &q.SortOrder, &q.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &q, nil
+}
+
+func updateQAItem(id int64, in QAItemInput) (*QAItem, error) {
+	_, err := db.Exec(`UPDATE interview_qa SET question = ?, answer = ?, reflection = ? WHERE id = ?`,
+		in.Question, in.Answer, in.Reflection, id)
+	if err != nil {
+		return nil, err
+	}
+	var q QAItem
+	err = db.QueryRow("SELECT "+qaCols+" FROM interview_qa WHERE id = ?", id).Scan(
+		&q.ID, &q.InterviewID, &q.Question, &q.Answer, &q.Reflection, &q.SortOrder, &q.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &q, nil
+}
+
+func deleteQAItem(id int64) error {
+	var interviewID, sortOrder int64
+	err := db.QueryRow("SELECT interview_id, sort_order FROM interview_qa WHERE id = ?", id).Scan(&interviewID, &sortOrder)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil
+		}
+		return err
+	}
+	if _, err := db.Exec("DELETE FROM interview_qa WHERE id = ?", id); err != nil {
+		return err
+	}
+	// 紧凑化: 被删条目之后的 sort_order 前移一位
+	_, err = db.Exec(`UPDATE interview_qa SET sort_order = sort_order - 1
+		WHERE interview_id = ? AND sort_order > ?`, interviewID, sortOrder)
+	return err
 }
 
 // ---- Stats ----

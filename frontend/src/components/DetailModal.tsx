@@ -1,8 +1,10 @@
 import {useEffect, useState} from 'react';
-import {Plus, Trash2, ChevronDown, ChevronUp, CalendarClock} from 'lucide-react';
+import {Plus, Trash2, ChevronDown, ChevronUp, CalendarClock, FileText, Copy, Check, Maximize2, Minimize2} from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import Modal from './Modal';
 import MarkdownEditor from './MarkdownEditor';
-import type {Application, ApplicationInput, Interview, InterviewInput, Status} from '../types';
+import type {Application, ApplicationInput, Interview, InterviewInput, QAItem, Status} from '../types';
 import {STATUS_META, STATUSES} from '../constants';
 import {api} from '../api';
 
@@ -36,6 +38,11 @@ export default function DetailModal({app, onClose, onChanged}: Props) {
     useEffect(() => {
         setForm((f) => (f.status === app.status ? f : {...f, status: app.status}));
     }, [app.status]);
+
+    // app 更新 (如 onChanged 刷新) 时同步面试列表
+    useEffect(() => {
+        setInterviews(app.interviews ?? []);
+    }, [app]);
 
     const refresh = async () => {
         await onChanged();
@@ -280,23 +287,48 @@ export default function DetailModal({app, onClose, onChanged}: Props) {
     );
 }
 
-function InterviewForm({
-    initial,
-    onSave,
-    onDelete,
-}: {
+interface InterviewFormProps {
     initial: Interview;
     onSave: (iv: Interview) => Promise<void>;
     onDelete: (iv: Interview) => Promise<void>;
-}) {
+}
+
+// 面试编辑: 支持全屏 (在内嵌与全屏两个位置复用同一表单)
+function InterviewForm(props: InterviewFormProps) {
+    const [fullscreen, setFullscreen] = useState(false);
+    return (
+        <>
+            <InterviewFormBody {...props} fullscreen={false} onRequestFullscreen={() => setFullscreen(true)}/>
+            {fullscreen && (
+                <Modal
+                    fullscreen
+                    title={`编辑面试 · ${props.initial.round_name || '面试'}`}
+                    onClose={() => setFullscreen(false)}
+                >
+                    <InterviewFormBody {...props} fullscreen={true} onRequestFullscreen={() => setFullscreen(false)}/>
+                </Modal>
+            )}
+        </>
+    );
+}
+
+function InterviewFormBody({
+    initial,
+    onSave,
+    onDelete,
+    fullscreen,
+    onRequestFullscreen,
+}: InterviewFormProps & {fullscreen: boolean; onRequestFullscreen: () => void}) {
     const [draft, setDraft] = useState({
         round_name: initial.round_name,
         scheduled_at: initial.scheduled_at,
         outcome: initial.outcome,
         questions_and_notes: initial.questions_and_notes,
     });
+    const [qaItems, setQaItems] = useState<QAItem[]>(initial.qa_items ?? []);
     const [saving, setSaving] = useState(false);
     const [msg, setMsg] = useState('');
+    const [previewOpen, setPreviewOpen] = useState(false);
 
     const inputCls = 'w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-amber-500 focus:ring-2 focus:ring-amber-200 focus:outline-none';
     const labelCls = 'block text-xs font-medium text-slate-500 mb-1';
@@ -314,8 +346,49 @@ function InterviewForm({
         }
     };
 
+    const addQA = async (after?: QAItem) => {
+        try {
+            const created = await api.createQA({
+                interview_id: initial.id,
+                question: '',
+                answer: '',
+                reflection: '',
+                sort_order: after ? after.sort_order + 1 : -1,
+            });
+            setQaItems((items) => {
+                const next = [...items, created];
+                next.sort((a, b) => a.sort_order - b.sort_order);
+                return next;
+            });
+        } catch (e: any) {
+            setMsg(String(e?.message ?? e));
+        }
+    };
+
+    const removeQA = async (item: QAItem) => {
+        if (item.id > 0) {
+            try {
+                await api.deleteQA(item.id);
+            } catch (e: any) {
+                setMsg(String(e?.message ?? e));
+                return;
+            }
+        }
+        setQaItems((items) => items.filter((i) => i.id !== item.id));
+    };
+
     return (
-        <div className="space-y-3 border-t border-slate-100 px-3 py-3">
+        <div className={fullscreen ? 'mx-auto max-w-3xl space-y-4' : 'space-y-3 border-t border-slate-100 px-3 py-3'}>
+            <div className="flex justify-end">
+                <button
+                    type="button"
+                    onClick={onRequestFullscreen}
+                    className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600 hover:bg-slate-200 transition-colors"
+                >
+                    {fullscreen ? <Minimize2 size={13}/> : <Maximize2 size={13}/>}
+                    {fullscreen ? '退出全屏' : '全屏编辑'}
+                </button>
+            </div>
             <div className="grid grid-cols-3 gap-3">
                 <div>
                     <label className={labelCls}>轮次名称</label>
@@ -334,13 +407,52 @@ function InterviewForm({
                     </select>
                 </div>
             </div>
+
+            {/* 逐条问题记录 */}
             <div>
-                <label className={labelCls}>问题 / 复盘笔记（Markdown）</label>
+                <div className="mb-1.5 flex items-center justify-between">
+                    <label className={labelCls + ' mb-0'}>逐条问题记录（{qaItems.length}）</label>
+                    <button
+                        type="button"
+                        onClick={() => setPreviewOpen(true)}
+                        className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600 hover:bg-slate-200 transition-colors"
+                    >
+                        <FileText size={13}/>
+                        Markdown 预览
+                    </button>
+                </div>
+                <div className="space-y-2">
+                    {qaItems.map((item, idx) => (
+                        <QAItemRow
+                            key={item.id}
+                            index={idx}
+                            item={item}
+                            onDelete={removeQA}
+                            onAddAfter={() => addQA(item)}
+                        />
+                    ))}
+                    {qaItems.length === 0 && (
+                        <div className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-300">
+                            点击下方「添加问题」逐条记录面试问题
+                        </div>
+                    )}
+                    <button
+                        type="button"
+                        onClick={() => addQA()}
+                        className="w-full rounded-lg border border-dashed border-slate-300 py-2 text-xs text-slate-400 hover:border-amber-400 hover:text-amber-600 transition-colors"
+                    >
+                        ＋ 添加问题
+                    </button>
+                </div>
+            </div>
+
+            <div>
+                <label className={labelCls}>整体复盘（Markdown）</label>
                 <MarkdownEditor
                     value={draft.questions_and_notes}
                     onChange={(v) => setDraft({...draft, questions_and_notes: v})}
-                    placeholder={'**问题：**\n- 提问内容\n\n**回答/改进：**\n- 下次注意…'}
-                    rows={4}
+                    placeholder={'整体表现、后续准备…'}
+                    rows={3}
                 />
             </div>
             <div className="flex items-center justify-between">
@@ -363,6 +475,177 @@ function InterviewForm({
                         {saving ? '保存中…' : '保存面试'}
                     </button>
                 </div>
+            </div>
+
+            {previewOpen && (
+                <InterviewMarkdownModal iv={{...initial, qa_items: qaItems}} onClose={() => setPreviewOpen(false)}/>
+            )}
+        </div>
+    );
+}
+
+// 面试 Markdown 预览弹窗
+function InterviewMarkdownModal({iv, onClose}: {iv: Interview; onClose: () => void}) {
+    const [copied, setCopied] = useState(false);
+    const md = buildInterviewMarkdown(iv);
+
+    const copy = async () => {
+        try {
+            await navigator.clipboard.writeText(md);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+        } catch {
+            // 降级: 选中文本
+            setCopied(false);
+        }
+    };
+
+    return (
+        <Modal
+            title={`${iv.round_name || '面试'} · Markdown 预览`}
+            onClose={onClose}
+            fullscreen
+            footer={
+                <>
+                    <button
+                        type="button"
+                        onClick={onClose}
+                        className="rounded-lg px-4 py-2 text-sm text-slate-500 hover:bg-slate-100 transition-colors"
+                    >
+                        关闭
+                    </button>
+                    <button
+                        type="button"
+                        onClick={copy}
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 transition-colors"
+                    >
+                        {copied ? <Check size={15}/> : <Copy size={15}/>}
+                        {copied ? '已复制' : '复制 Markdown'}
+                    </button>
+                </>
+            }
+        >
+            <div className="mx-auto max-w-3xl">
+                <div className="md-body text-sm">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{md}</ReactMarkdown>
+                </div>
+            </div>
+        </Modal>
+    );
+}
+
+// 生成面试的完整 Markdown 文档
+export function buildInterviewMarkdown(iv: Interview): string {
+    const lines: string[] = [];
+    lines.push(`## ${iv.round_name || '面试'}${iv.scheduled_at ? `（${iv.scheduled_at.replace('T', ' ')}）` : ''}`);
+    lines.push('');
+    const outcomeLabel = iv.outcome === 'PASSED' ? '通过' : iv.outcome === 'FAILED' ? '未通过' : '待定';
+    lines.push(`**结果：** ${outcomeLabel}`);
+    lines.push('');
+    (iv.qa_items ?? []).forEach((q, i) => {
+        lines.push(`### Q${i + 1}. ${q.question || '（未填写问题）'}`);
+        lines.push('');
+        if (q.answer) {
+            lines.push(`**我的回答：** ${q.answer}`);
+            lines.push('');
+        }
+        if (q.reflection) {
+            lines.push(`**复盘改进：** ${q.reflection}`);
+            lines.push('');
+        }
+    });
+    if (iv.questions_and_notes) {
+        lines.push(`## 整体复盘`);
+        lines.push('');
+        lines.push(iv.questions_and_notes);
+        lines.push('');
+    }
+    return lines.join('\n');
+}
+
+// 单条问题记录: 即时保存 (失焦保存), 可删除, 可在此条后插入
+function QAItemRow({index, item, onDelete, onAddAfter}: {
+    index: number;
+    item: QAItem;
+    onDelete: (item: QAItem) => Promise<void>;
+    onAddAfter: () => void;
+}) {
+    const [draft, setDraft] = useState({...item});
+    const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+
+    const save = async () => {
+        setStatus('saving');
+        try {
+            const updated = await api.updateQA(item.id, {
+                interview_id: item.interview_id,
+                question: draft.question,
+                answer: draft.answer,
+                reflection: draft.reflection,
+                sort_order: item.sort_order,
+            });
+            setDraft({...updated});
+            setStatus('saved');
+        } catch {
+            setStatus('error');
+        }
+    };
+
+    const inputCls = 'w-full rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs focus:border-amber-500 focus:ring-2 focus:ring-amber-200 focus:outline-none';
+    const taCls = inputCls + ' resize-y';
+
+    return (
+        <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-2.5">
+            <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[11px] font-semibold text-slate-400 font-mono">Q{index + 1}</span>
+                <div className="flex items-center gap-2">
+                    <span className={`text-[10px] ${status === 'error' ? 'text-rose-500' : status === 'saved' ? 'text-emerald-500' : status === 'saving' ? 'text-slate-400' : 'text-transparent'}`}>
+                        {status === 'saving' ? '保存中…' : status === 'saved' ? '已保存' : status === 'error' ? '保存失败' : '·'}
+                    </span>
+                    <button
+                        type="button"
+                        onClick={() => onDelete(item)}
+                        className="rounded p-0.5 text-slate-300 hover:bg-rose-50 hover:text-rose-500 transition-colors"
+                        title="删除此问题"
+                    >
+                        <Trash2 size={13}/>
+                    </button>
+                </div>
+            </div>
+            <div className="space-y-1.5">
+                <input
+                    className={inputCls}
+                    value={draft.question}
+                    onChange={(e) => setDraft({...draft, question: e.target.value})}
+                    onBlur={save}
+                    placeholder="问题：面试官问了什么？"
+                />
+                <textarea
+                    rows={2}
+                    className={taCls}
+                    value={draft.answer}
+                    onChange={(e) => setDraft({...draft, answer: e.target.value})}
+                    onBlur={save}
+                    placeholder="我的回答…"
+                />
+                <textarea
+                    rows={2}
+                    className={taCls}
+                    value={draft.reflection}
+                    onChange={(e) => setDraft({...draft, reflection: e.target.value})}
+                    onBlur={save}
+                    placeholder="复盘改进：下次怎么做更好？"
+                />
+            </div>
+            <div className="mt-1.5 flex justify-end">
+                <button
+                    type="button"
+                    onClick={onAddAfter}
+                    className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px] text-slate-400 hover:bg-white hover:text-amber-600 transition-colors"
+                    title="在本条之后添加问题"
+                >
+                    <Plus size={12}/>
+                    在本条后添加
+                </button>
             </div>
         </div>
     );

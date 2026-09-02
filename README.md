@@ -11,7 +11,7 @@
   - 首次进入「面试中」或「面试挂」自动标记 `reached_interview`（用于面试率统计，只增不改）
 - **面试挂自动同步**：任一轮面试标记为「未通过」时，卡片自动移到「面试挂」列；改回后自动回到「面试中」
 - **投递详情**：公司、岗位、简历版本、JD 原文、薪资、地点、联系方式、Markdown 备注
-- **面试记录**：每个投递可添加多轮面试（轮次名称、时间、结果、Markdown 问题与复盘笔记）
+- **面试记录**：每个投递可添加多轮面试（轮次名称、时间、结果、整体复盘），并支持**逐条问题记录**（问题 → 我的回答 → 复盘改进，失焦自动保存、任意位置插入、可增删）、**全屏编辑**与**Markdown 预览**（一键生成/复制完整面试文档）
 - **统计**：投递总数 / 面试率 / Offer 率，以及按简历版本统计面试转化率
 - **搜索**：按公司 / 岗位 / 简历版本 / 地点过滤
 - **导出**：一键导出 CSV（applications / interviews 两张表）+ JSON 完整结构
@@ -63,8 +63,9 @@ wails build
 
 ## 数据库 Schema
 
-- `applications`：投递记录（`status`：APPLIED / INTERVIEWING / OFFERED / RESUME_REJECTED / INTERVIEW_FAILED / DECLINED，含 `reached_interview`、`applied_at` 等）
+- `applications`：投递记录（`status`：APPLIED / INTERVIEWING / OFFERED / RESUME_REJECTED / INTERVIEW_FAILED / DECLINED，含 `reached_interview`、`failed_round`、`applied_at` 等）
 - `interviews`：面试记录（`application_id` 外键，级联删除）
+- `interview_qa`：逐条问题记录（`interview_id` 外键，级联删除；question / answer / reflection）
 - 触发器：`applications` 更新时自动刷新 `updated_at`
 - 索引：`status` 与 `application_id`
 - 旧版本状态（WISHLIST / REJECTED / ARCHIVED）启动时自动迁移到新状态集

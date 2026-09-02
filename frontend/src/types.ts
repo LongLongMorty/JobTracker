@@ -46,6 +46,25 @@ export interface Interview {
     questions_and_notes: string;
     outcome: 'PENDING' | 'PASSED' | 'FAILED';
     created_at: string;
+    qa_items?: QAItem[];
+}
+
+export interface QAItem {
+    id: number;
+    interview_id: number;
+    question: string;
+    answer: string;
+    reflection: string;
+    sort_order: number;
+    created_at: string;
+}
+
+export interface QAItemInput {
+    interview_id: number;
+    question: string;
+    answer: string;
+    reflection: string;
+    sort_order: number; // <=0 = 追加到末尾; >0 = 插入到该序号位置
 }
 
 export interface InterviewInput {

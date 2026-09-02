@@ -6,9 +6,13 @@ export function CreateApplication(arg1:main.ApplicationInput):Promise<main.Appli
 
 export function CreateInterview(arg1:main.InterviewInput):Promise<main.Interview>;
 
+export function CreateQAItem(arg1:main.QAItemInput):Promise<main.QAItem>;
+
 export function DeleteApplication(arg1:number):Promise<void>;
 
 export function DeleteInterview(arg1:number):Promise<void>;
+
+export function DeleteQAItem(arg1:number):Promise<void>;
 
 export function ExportData():Promise<string>;
 
@@ -25,3 +29,5 @@ export function UpdateApplication(arg1:number,arg2:main.ApplicationInput):Promis
 export function UpdateApplicationStatus(arg1:number,arg2:string):Promise<main.Application>;
 
 export function UpdateInterview(arg1:number,arg2:main.InterviewInput):Promise<main.Interview>;
+
+export function UpdateQAItem(arg1:number,arg2:main.QAItemInput):Promise<main.QAItem>;

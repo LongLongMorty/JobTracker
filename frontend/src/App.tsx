@@ -61,6 +61,11 @@ export default function App() {
         return map;
     }, [apps, search]);
 
+    const openDetail = async (app: Application) => {
+        const fresh = await api.getApplication(app.id);
+        setDetail(fresh);
+    };
+
     const handleDrop = async (status: Status, appId: number) => {
         const current = apps.find((a) => a.id === appId);
         if (!current || current.status === status) return;
@@ -170,7 +175,7 @@ export default function App() {
                             key={s}
                             status={s}
                             apps={grouped.get(s) ?? []}
-                            onOpen={setDetail}
+                            onOpen={openDetail}
                             onDropOnColumn={handleDrop}
                             onQuickAdd={(status) => setModal({app: null, status})}
                         />

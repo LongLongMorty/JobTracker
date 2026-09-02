@@ -55,6 +55,7 @@ type Interview struct {
 	QuestionsAndNotes string `json:"questions_and_notes"`
 	Outcome           string `json:"outcome"` // PENDING/PASSED/FAILED
 	CreatedAt         string `json:"created_at"`
+	QAItems           []*QAItem `json:"qa_items,omitempty"` // 逐条问题记录
 }
 
 // InterviewInput 创建/更新面试记录
@@ -64,6 +65,26 @@ type InterviewInput struct {
 	ScheduledAt       string `json:"scheduled_at"`
 	QuestionsAndNotes string `json:"questions_and_notes"`
 	Outcome           string `json:"outcome"`
+}
+
+// QAItem 面试中的逐条问题记录
+type QAItem struct {
+	ID          int64  `json:"id"`
+	InterviewID int64  `json:"interview_id"`
+	Question    string `json:"question"`
+	Answer      string `json:"answer"`
+	Reflection  string `json:"reflection"` // 复盘改进
+	SortOrder   int64  `json:"sort_order"`
+	CreatedAt   string `json:"created_at"`
+}
+
+// QAItemInput 创建/更新问题条目
+type QAItemInput struct {
+	InterviewID int64  `json:"interview_id"`
+	Question    string `json:"question"`
+	Answer      string `json:"answer"`
+	Reflection  string `json:"reflection"`
+	SortOrder   int64  `json:"sort_order"` // <=0 = 追加到末尾; >0 = 插入到该序号位置
 }
 
 // Stats 统计信息
