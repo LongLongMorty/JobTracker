@@ -27,8 +27,34 @@ func NewApp() *App {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	if err := initDB(); err != nil {
+		writeErrorLog("初始化数据库失败: " + err.Error())
 		runtime.LogErrorf(ctx, "初始化数据库失败: %v", err)
 	}
+}
+
+// shutdown 关闭数据库连接
+func (a *App) shutdown(ctx context.Context) {
+	if db != nil {
+		if err := db.Close(); err != nil {
+			writeErrorLog("关闭数据库失败: " + err.Error())
+		}
+	}
+}
+
+// writeErrorLog 把错误写入 %APPDATA%/jobtracker/error.log (GUI 无控制台, 便于排障)
+func writeErrorLog(msg string) {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return
+	}
+	dir = filepath.Join(dir, "jobtracker")
+	_ = os.MkdirAll(dir, 0o755)
+	f, err := os.OpenFile(filepath.Join(dir, "error.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "[%s] %s\n", time.Now().Format("2006-01-02 15:04:05"), msg)
 }
 
 // ---- Applications ----
@@ -120,7 +146,7 @@ func (a *App) ExportData() (string, error) {
 		ap.Interviews = ivs
 	}
 
-	ts := time.Now().Format("20060102-150405")
+	ts := time.Now().Format("20060102-150405.000")
 
 	// JSON (完整结构, 面试嵌套在申请内)
 	jsonData, err := json.MarshalIndent(map[string]any{"exported_at": time.Now().Format(time.RFC3339), "applications": apps}, "", "  ")
@@ -152,13 +178,14 @@ func writeApplicationsCSV(path string, apps []*Application) error {
 	defer f.Close()
 	w := csv.NewWriter(f)
 	defer w.Flush()
-	if err := w.Write([]string{"id", "company", "position", "status", "resume_version", "jd_text", "applied_at", "location", "salary_range", "contact_info", "notes", "created_at", "updated_at"}); err != nil {
+	if err := w.Write([]string{"id", "company", "position", "status", "resume_version", "jd_text", "applied_at", "location", "salary_range", "contact_info", "notes", "reached_interview", "failed_round", "created_at", "updated_at"}); err != nil {
 		return err
 	}
 	for _, a := range apps {
 		if err := w.Write([]string{
 			itoa(a.ID), a.Company, a.Position, a.Status, a.ResumeVersion, a.JDText,
-			a.AppliedAt, a.Location, a.SalaryRange, a.ContactInfo, a.Notes, a.CreatedAt, a.UpdatedAt,
+			a.AppliedAt, a.Location, a.SalaryRange, a.ContactInfo, a.Notes,
+			itoa(a.ReachedInterview), itoa(a.FailedRound), a.CreatedAt, a.UpdatedAt,
 		}); err != nil {
 			return err
 		}

@@ -44,6 +44,19 @@ wails build
 
 > 注意：`wails dev` / `wails build` 会自动重新生成 `frontend/wailsjs` 绑定文件；若修改了 Go 端 struct 或方法，无需手动操作。
 
+## 质量检查
+
+```bash
+# 后端: 静态检查 (需 go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest)
+golangci-lint run
+
+# 前端: 单元测试 / 格式检查 / 格式化
+cd frontend
+npm test
+npm run format:check
+npm run format
+```
+
 ## 项目结构
 
 ```

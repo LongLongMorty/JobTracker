@@ -26,7 +26,9 @@ type Application struct {
 	// 首次进入面试流程时置 1, 只增不改 (统计用)
 	ReachedInterview int64 `json:"reached_interview"`
 	// 面试挂时的轮次 (0 = 无, 由 FAILED 面试自动计算)
-	FailedRound    int64        `json:"failed_round"`
+	FailedRound int64 `json:"failed_round"`
+	// 面试记录数 (列表查询时批量填充, 详情查询时=len(Interviews))
+	InterviewCount int64        `json:"interview_count"`
 	CreatedAt      string       `json:"created_at"`
 	UpdatedAt      string       `json:"updated_at"`
 	Interviews     []*Interview `json:"interviews,omitempty"`
@@ -48,13 +50,13 @@ type ApplicationInput struct {
 
 // Interview 面试记录 (1-N 关联 Application)
 type Interview struct {
-	ID                int64  `json:"id"`
-	ApplicationID     int64  `json:"application_id"`
-	RoundName         string `json:"round_name"`
-	ScheduledAt       string `json:"scheduled_at"` // YYYY-MM-DDTHH:mm
-	QuestionsAndNotes string `json:"questions_and_notes"`
-	Outcome           string `json:"outcome"` // PENDING/PASSED/FAILED
-	CreatedAt         string `json:"created_at"`
+	ID                int64     `json:"id"`
+	ApplicationID     int64     `json:"application_id"`
+	RoundName         string    `json:"round_name"`
+	ScheduledAt       string    `json:"scheduled_at"` // YYYY-MM-DDTHH:mm
+	QuestionsAndNotes string    `json:"questions_and_notes"`
+	Outcome           string    `json:"outcome"` // PENDING/PASSED/FAILED
+	CreatedAt         string    `json:"created_at"`
 	QAItems           []*QAItem `json:"qa_items,omitempty"` // 逐条问题记录
 }
 
@@ -89,16 +91,16 @@ type QAItemInput struct {
 
 // Stats 统计信息
 type Stats struct {
-	TotalApplications int64   `json:"total_applications"`
-	Interviewing      int64   `json:"interviewing"`      // 当前处于面试中
-	ReachedInterview  int64   `json:"reached_interview"` // 进入过面试的申请数
-	Offered           int64   `json:"offered"`
-	ResumeRejected    int64   `json:"resume_rejected"`  // 简历挂
-	InterviewFailed   int64   `json:"interview_failed"` // 面试挂
-	Declined          int64   `json:"declined"`         // 我拒绝对方
-	InterviewRate     float64 `json:"interview_rate"`   // ReachedInterview / Total
-	OfferRate         float64 `json:"offer_rate"`       // Offered / Total
-	ByResumeVersion   []ResumeVersionStat  `json:"by_resume_version"`
+	TotalApplications int64               `json:"total_applications"`
+	Interviewing      int64               `json:"interviewing"`      // 当前处于面试中
+	ReachedInterview  int64               `json:"reached_interview"` // 进入过面试的申请数
+	Offered           int64               `json:"offered"`
+	ResumeRejected    int64               `json:"resume_rejected"`  // 简历挂
+	InterviewFailed   int64               `json:"interview_failed"` // 面试挂
+	Declined          int64               `json:"declined"`         // 我拒绝对方
+	InterviewRate     float64             `json:"interview_rate"`   // ReachedInterview / Total
+	OfferRate         float64             `json:"offer_rate"`       // Offered / Total
+	ByResumeVersion   []ResumeVersionStat `json:"by_resume_version"`
 }
 
 // ResumeVersionStat 按简历版本统计

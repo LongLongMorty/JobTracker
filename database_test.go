@@ -2,16 +2,20 @@ package main
 
 import (
 	"database/sql"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
 func openTestDB(t *testing.T) {
 	t.Helper()
-	d, err := sql.Open("sqlite", "file:memdb"+t.Name()+"?mode=memory&cache=shared&_pragma=foreign_keys(1)")
+	d, err := sql.Open("sqlite", "file:memdb"+t.Name()+"?mode=memory&cache=shared&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
 	d.SetMaxOpenConns(1)
+	t.Cleanup(func() { d.Close() })
 	db = d
 	if err := migrate(); err != nil {
 		t.Fatalf("migrate: %v", err)
@@ -234,7 +238,9 @@ func TestLegacyStatusMigration(t *testing.T) {
 		t.Fatalf("seed legacy: %v", err)
 	}
 	id, _ := res.LastInsertId()
-	db.Exec(`UPDATE applications SET status = 'REJECTED', reached_interview = 1 WHERE id = ?`, id)
+	if _, err := db.Exec(`UPDATE applications SET status = 'REJECTED', reached_interview = 1 WHERE id = ?`, id); err != nil {
+		t.Fatalf("seed legacy status: %v", err)
+	}
 
 	if err := migrate(); err != nil {
 		t.Fatalf("migrate: %v", err)
@@ -277,5 +283,83 @@ func TestEmptyDatabase(t *testing.T) {
 	}
 	if st.ByResumeVersion == nil {
 		t.Fatal("by_resume_version should be empty slice, not nil")
+	}
+}
+
+// 列表应批量填充 interview_count (看板徽章依赖)
+func TestInterviewCountInList(t *testing.T) {
+	openTestDB(t)
+
+	a, err := insertApplication(ApplicationInput{Company: "Acme", Position: "BE"})
+	if err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	if _, err := insertInterview(InterviewInput{ApplicationID: a.ID, RoundName: "1st", ScheduledAt: "2026-09-01T10:00"}); err != nil {
+		t.Fatalf("insert interview: %v", err)
+	}
+
+	apps, err := listApplications()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(apps) != 1 || apps[0].InterviewCount != 1 {
+		t.Fatalf("interview_count should be 1 in list, got %d", apps[0].InterviewCount)
+	}
+	detail, err := getApplication(a.ID)
+	if err != nil || detail.InterviewCount != 1 {
+		t.Fatalf("interview_count should be 1 in detail, got %d", detail.InterviewCount)
+	}
+}
+
+// CSV 导出: 表头应包含派生字段, 内容与数据库一致
+func TestExportCSV(t *testing.T) {
+	openTestDB(t)
+
+	a, err := insertApplication(ApplicationInput{Company: "Acme", Position: "BE", Status: StatusInterviewFailed, Notes: "复盘"})
+	if err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	if _, err := insertInterview(InterviewInput{ApplicationID: a.ID, RoundName: "1st", ScheduledAt: "2026-09-01T10:00", Outcome: "FAILED"}); err != nil {
+		t.Fatalf("insert interview: %v", err)
+	}
+	apps, err := listApplications()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	for _, ap := range apps {
+		ivs, _ := listInterviews(ap.ID)
+		ap.Interviews = ivs
+	}
+
+	dir := t.TempDir()
+	appsPath := filepath.Join(dir, "apps.csv")
+	ivsPath := filepath.Join(dir, "ivs.csv")
+	if err := writeApplicationsCSV(appsPath, apps); err != nil {
+		t.Fatalf("write apps csv: %v", err)
+	}
+	if err := writeInterviewsCSV(ivsPath, apps); err != nil {
+		t.Fatalf("write ivs csv: %v", err)
+	}
+
+	appsData, err := os.ReadFile(appsPath)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	appsCSV := string(appsData)
+	for _, col := range []string{"reached_interview", "failed_round", "updated_at"} {
+		if !strings.Contains(appsCSV, col) {
+			t.Fatalf("apps csv missing column %q", col)
+		}
+	}
+	if !strings.Contains(appsCSV, "Acme") {
+		t.Fatal("apps csv missing company data")
+	}
+
+	ivsData, err := os.ReadFile(ivsPath)
+	if err != nil {
+		t.Fatalf("read ivs: %v", err)
+	}
+	if !strings.Contains(string(ivsData), "qa_items") {
+		t.Fatal("ivs csv missing qa_items column")
 	}
 }

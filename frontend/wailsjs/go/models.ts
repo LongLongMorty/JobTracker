@@ -82,6 +82,7 @@ export namespace main {
 	    notes: string;
 	    reached_interview: number;
 	    failed_round: number;
+	    interview_count: number;
 	    created_at: string;
 	    updated_at: string;
 	    interviews?: Interview[];
@@ -105,6 +106,7 @@ export namespace main {
 	        this.notes = source["notes"];
 	        this.reached_interview = source["reached_interview"];
 	        this.failed_round = source["failed_round"];
+	        this.interview_count = source["interview_count"];
 	        this.created_at = source["created_at"];
 	        this.updated_at = source["updated_at"];
 	        this.interviews = this.convertValues(source["interviews"], Interview);
