@@ -288,11 +288,12 @@ export default function DetailModal({ app, onClose, onChanged }: Props) {
             </div>
           </div>
           <div className="col-span-2">
-            <label className={labelCls}>联系方式 / 内推备注</label>
+            <label className={labelCls}>投递方式</label>
             <input
               className={inputCls}
               value={form.contact_info}
               onChange={(e) => set("contact_info", e.target.value)}
+              placeholder="如 BOSS直聘 / 官网 / 内推"
             />
           </div>
         </section>

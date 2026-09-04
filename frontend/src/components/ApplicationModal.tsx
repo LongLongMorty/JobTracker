@@ -151,12 +151,12 @@ export default function ApplicationModal({
           </div>
         </div>
         <div>
-          <label className={labelCls}>联系方式 / 内推备注</label>
+          <label className={labelCls}>投递方式</label>
           <input
             className={inputCls}
             value={form.contact_info}
             onChange={(e) => set("contact_info", e.target.value)}
-            placeholder="Recruiter 姓名 / 邮箱 / 内推人"
+            placeholder="如 BOSS直聘 / 官网 / 内推"
           />
         </div>
         <div>

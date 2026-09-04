@@ -40,7 +40,7 @@ A lightweight, single-user desktop application designed to track and manage job 
   - `applied_at`: DATETIME (新建/拖入 Applied 列时自动填充, 可手动修改)
   - `location`: TEXT
   - `salary_range`: TEXT
-  - `contact_info`: TEXT (Recruiter name/email/referral note)
+  - `contact_info`: TEXT (投递方式, e.g., BOSS直聘 / 官网 / 内推)
   - `notes`: TEXT (Markdown supported)
   - `created_at` / `updated_at`: DATETIME (`updated_at` 由 trigger 自动更新)
 
